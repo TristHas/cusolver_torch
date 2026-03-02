@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -45,24 +46,58 @@ def _find_nvidia_include_dirs() -> list[str]:
     return out
 
 
+def _version_key(path: Path) -> tuple[int, ...]:
+    parts = re.findall(r"\d+", path.name)
+    if not parts:
+        return tuple()
+    return tuple(int(x) for x in parts)
+
+
+def _pick_soname(libdir: Path, stem: str) -> str | None:
+    """
+    Return a link flag argument for one CUDA lib in `libdir`.
+    Prefer unversioned .so, else highest versioned .so.*.
+    """
+    unversioned = libdir / f"lib{stem}.so"
+    if unversioned.exists():
+        return f"-l:{unversioned.name}"
+
+    candidates = sorted(
+        libdir.glob(f"lib{stem}.so*"),
+        key=_version_key,
+        reverse=True,
+    )
+    for c in candidates:
+        if c.is_file():
+            return f"-l:{c.name}"
+    return None
+
+
 def _find_linker_flags() -> list[str]:
     flags: list[str] = []
+
+    def _flags_for_dir(libdir: Path) -> list[str] | None:
+        cusolver = _pick_soname(libdir, "cusolver")
+        cublas = _pick_soname(libdir, "cublas")
+        cusparse = _pick_soname(libdir, "cusparse")
+        if not (cusolver and cublas and cusparse):
+            return None
+        return [
+            f"-L{libdir}",
+            cusolver,
+            cublas,
+            cusparse,
+            f"-Wl,-rpath,{libdir}",
+        ]
 
     # conda targets lib path (preferred for soname links)
     prefix = Path(torch.__file__).resolve().parents[4]
     for triplet in ("x86_64-linux", "sbsa-linux"):
         libdir = prefix / "targets" / triplet / "lib"
         if libdir.exists():
-            flags.extend(
-                [
-                    f"-L{libdir}",
-                    "-l:libcusolver.so.11",
-                    "-l:libcublas.so.12",
-                    "-l:libcusparse.so.12",
-                    f"-Wl,-rpath,{libdir}",
-                ]
-            )
-            return flags
+            dflags = _flags_for_dir(libdir)
+            if dflags is not None:
+                return dflags
 
     # pip nvidia libs fallback
     nvidia_root = Path(torch.__file__).resolve().parent.parent / "nvidia"
@@ -70,12 +105,17 @@ def _find_linker_flags() -> list[str]:
     cusolver_lib = nvidia_root / "cusolver" / "lib"
     cusparse_lib = nvidia_root / "cusparse" / "lib"
 
+    # some wheel layouts keep all three in separate dirs; add search/rpath for each
     for d in (cublas_lib, cusolver_lib, cusparse_lib):
         if d.exists():
             flags.append(f"-L{d}")
             flags.append(f"-Wl,-rpath,{d}")
 
-    flags.extend(["-lcusolver", "-l:libcublas.so.12", "-l:libcusparse.so.12"])
+    # Prefer exact filenames if discoverable, else generic -l names.
+    cusolver = _pick_soname(cusolver_lib, "cusolver") if cusolver_lib.exists() else None
+    cublas = _pick_soname(cublas_lib, "cublas") if cublas_lib.exists() else None
+    cusparse = _pick_soname(cusparse_lib, "cusparse") if cusparse_lib.exists() else None
+    flags.extend([cusolver or "-lcusolver", cublas or "-lcublas", cusparse or "-lcusparse"])
     return flags
 
 
