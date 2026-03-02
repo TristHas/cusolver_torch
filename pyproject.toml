@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cusolver-torch"
+version = "0.1.0"
+description = "Torch CUDA tensor wrapper around cuSOLVER symmetric eigensolvers"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "tristan" }]
+dependencies = ["torch>=2.1"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+cusolver_torch = ["*.cu"]
