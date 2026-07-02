@@ -9,7 +9,7 @@ description = "Torch CUDA tensor wrapper around cuSOLVER symmetric eigensolvers"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [{ name = "tristan" }]
-dependencies = ["torch>=2.1"]
+#dependencies = ["torch>=2.1"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
